@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AssistantRuntimeProvider,
   useExternalStoreRuntime,
@@ -8,6 +8,7 @@ import {
   type ThreadMessageLike,
 } from "@assistant-ui/react";
 import { Thread } from "@/components/assistant-ui/elements/thread.aui";
+import { OptimizeModeProvider, OptimizeToggle } from "@/components/optimize-toggle";
 import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-icon-button";
 import { ObserveTools, type ObservedTool } from "@/components/observe-tools";
 import { RefreshCwIcon } from "lucide-react";
@@ -37,6 +38,8 @@ export const Assistant = () => {
   const [connected, setConnected] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [tab, setTab] = useState<"ask" | "observe">("ask");
+  const [optimize, setOptimize] = useState(false);
+  const optimizeRef = useRef(false);
   const [tools, setTools] = useState<ObservedTool[]>([]);
   const messages = useMemo(() => toMessages(state), [state]);
 
@@ -72,7 +75,11 @@ export const Assistant = () => {
       const response = await fetch("/api/agent/messages", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text, requestId: crypto.randomUUID() }),
+        body: JSON.stringify({
+          text,
+          requestId: crypto.randomUUID(),
+          optimize: optimizeRef.current,
+        }),
       });
       if (!response.ok) {
         const body = (await response.json().catch(() => ({}))) as { error?: string };
@@ -123,9 +130,17 @@ export const Assistant = () => {
             <RefreshCwIcon />
           </TooltipIconButton>
         </header>
-        <div className={tab === "ask" ? "min-h-0 flex-1" : "hidden"}>
-          <Thread />
-        </div>
+        <OptimizeModeProvider
+          enabled={optimize}
+          setEnabled={(enabled) => {
+            optimizeRef.current = enabled;
+            setOptimize(enabled);
+          }}
+        >
+          <div className={tab === "ask" ? "min-h-0 flex-1" : "hidden"}>
+            <Thread components={{ ComposerExtra: OptimizeToggle }} />
+          </div>
+        </OptimizeModeProvider>
         <div className={tab === "observe" ? "min-h-0 flex-1" : "hidden"}>
           <ObserveTools tools={tools} />
         </div>

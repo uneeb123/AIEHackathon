@@ -13,6 +13,8 @@ import {
   Harness,
   section,
 } from "@earendil-works/pi-durable";
+import { bindOptimize } from "./optimize-bridge.ts";
+import { OptimizeMode } from "./optimize-mode.ts";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 
@@ -113,6 +115,20 @@ const harness = await Harness.open(
   context,
 );
 const root = await harness.root(context, { agent: { model, cwd: workspace } });
+bindOptimize({
+  read: async () =>
+    (await harness.snapshot(OptimizeMode, root.id, context)) ?? {
+      enabled: false,
+      question: "",
+      calls: [],
+    },
+  remember: async (call) => {
+    await root.commit(async (tx) => {
+      const doc = await tx.doc(OptimizeMode, root.id);
+      if (doc.calls.length < 8) doc.calls.push(call);
+    }, context);
+  },
+});
 const view = await root.viewState(context);
 const stored = view.value.docs["pi.agent"]?.model;
 const current =
@@ -329,9 +345,16 @@ async function handle(req, res) {
   if (req.method === "POST" && url.pathname === "/api/messages") {
     let body = "";
     for await (const chunk of req) body += chunk;
-    const { text, requestId, wait } = JSON.parse(body || "{}");
+    const { text, requestId, wait, optimize } = JSON.parse(body || "{}");
     if (typeof text !== "string" || !text.trim())
       return send(res, 400, { error: "text is required" });
+    const question = text.trim();
+    await root.commit(async (tx) => {
+      const doc = await tx.doc(OptimizeMode, root.id);
+      doc.enabled = optimize === true;
+      doc.question = question.slice(0, 2000);
+      doc.calls.splice(0, doc.calls.length);
+    }, context);
     const submission = await root.submit(
       {
         type: "input",
