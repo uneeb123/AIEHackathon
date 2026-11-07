@@ -151,6 +151,7 @@ function summarize(value) {
       if (part.type === "toolCall") {
         const tool = {
           type: "tool",
+          id: part.id,
           name: part.name,
           args: part.arguments,
           status: "pending",
@@ -200,8 +201,12 @@ function summarize(value) {
         output: running.output ?? "",
       });
   }
-  for (const tool of tools.values())
-    tool.output = String(tool.output).slice(-4000);
+  for (const tool of tools.values()) {
+    const text = String(tool.output);
+    tool.output = tool.name.startsWith("financial_datasets__")
+      ? text.slice(0, 6000)
+      : text.slice(-4000);
+  }
   for (const queued of value.docs["pi.inbox"]?.items ?? []) {
     if (queued.entry?.kind === "chat.input")
       items.push({ type: "user", ...queued.entry.data, queued: true });

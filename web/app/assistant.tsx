@@ -14,7 +14,14 @@ import { RefreshCwIcon } from "lucide-react";
 type AgentItem =
   | { type: "user"; text: string; author?: string; queued?: boolean }
   | { type: "assistant"; text: string; live?: boolean }
-  | { type: "tool"; name: string; args?: unknown; status: string; output: string }
+  | {
+      type: "tool";
+      id?: string;
+      name: string;
+      args?: unknown;
+      status: string;
+      output: string;
+    }
   | { type: "note"; text: string };
 
 type AgentState = {
@@ -142,18 +149,20 @@ function toMessages(state: AgentState | null): ThreadMessageLike[] {
       draft.live = Boolean(item.live);
       draft.parts.push({ type: "text", text: item.text });
     } else if (item.type === "tool") {
-      draft.live = item.status === "pending" || item.status === "running";
+      const running = item.status === "pending" || item.status === "running";
+      draft.live = running;
       const args =
         item.args && typeof item.args === "object"
           ? (item.args as Record<string, unknown>)
           : { value: item.args ?? null };
       draft.parts.push({
         type: "tool-call",
-        toolCallId: `tool-${index}`,
+        toolCallId: item.id ?? `tool-${index}`,
         toolName: item.name,
         args,
-        result: item.output,
-        isError: item.status === "error",
+        ...(running
+          ? { isPreliminary: true, ...(item.output ? { result: item.output } : {}) }
+          : { result: item.output, isError: item.status === "error" }),
       });
     } else {
       draft.parts.push({ type: "text", text: item.text });

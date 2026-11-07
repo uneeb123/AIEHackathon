@@ -16,6 +16,10 @@ import {
   ReasoningText,
   ReasoningTrigger,
 } from "@/components/assistant-ui/elements/reasoning.aui";
+import {
+  FinancialDatasetsTool,
+  isFinancialDatasetsTool,
+} from "@/components/assistant-ui/financial-datasets-tool";
 import { ToolFallback } from "@/components/assistant-ui/elements/tool-fallback.aui";
 import {
   ToolGroupContent,
@@ -130,11 +134,19 @@ export type ThreadComponents = {
   ComposerExtra?: ComponentType | undefined;
 };
 
-const messageGroupBy = groupPartByType({
+const groupedByType = groupPartByType({
   reasoning: ["group-chainOfThought", "group-reasoning"],
   "tool-call": ["group-chainOfThought", "group-tool"],
   "standalone-tool-call": [],
 });
+
+const messageGroupBy = (
+  part: Parameters<typeof groupedByType>[0],
+  context?: Parameters<typeof groupedByType>[1],
+) =>
+  part.type === "tool-call" && isFinancialDatasetsTool(part.toolName)
+    ? []
+    : groupedByType(part, context);
 
 type ThreadGroupKey =
   | "group-chainOfThought"
@@ -636,6 +648,8 @@ const AssistantMessage: FC = () => {
               case "reasoning":
                 return <Reasoning {...part} />;
               case "tool-call":
+                if (isFinancialDatasetsTool(part.toolName))
+                  return <FinancialDatasetsTool {...part} />;
                 return part.toolUI ?? <ToolFallbackComponent {...part} />;
               case "data":
                 return part.dataRendererUI;
