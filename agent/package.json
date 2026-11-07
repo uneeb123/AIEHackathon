@@ -1,0 +1,13 @@
+{
+  "name": "aie-agent",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node agent.ts"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.3.0",
+    "@earendil-works/pi-ai": "1.3.0",
+    "@earendil-works/pi-durable": "1.3.0"
+  }
+}

@@ -1,0 +1,17 @@
+[Unit]
+Description=Pi Durable agent
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+User=exedev
+WorkingDirectory=/home/exedev/pi-durable
+EnvironmentFile=/home/exedev/pi-durable/agent.env
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/node agent.ts
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target
