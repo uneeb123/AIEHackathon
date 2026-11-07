@@ -8,6 +8,8 @@ import {
   type ThreadMessageLike,
 } from "@assistant-ui/react";
 import { Thread } from "@/components/assistant-ui/elements/thread.aui";
+import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-icon-button";
+import { RefreshCwIcon } from "lucide-react";
 
 type AgentItem =
   | { type: "user"; text: string; author?: string; queued?: boolean }
@@ -24,6 +26,7 @@ type AgentState = {
 export const Assistant = () => {
   const [state, setState] = useState<AgentState | null>(null);
   const [connected, setConnected] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const messages = useMemo(() => toMessages(state), [state]);
 
   useEffect(() => {
@@ -58,6 +61,19 @@ export const Assistant = () => {
     },
   });
 
+  async function refresh() {
+    setRefreshing(true);
+    try {
+      const response = await fetch("/api/agent/reset", { method: "POST" });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? response.statusText);
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   const status = !connected ? "reconnecting" : state?.busy ? "working" : "idle";
 
   return (
@@ -68,6 +84,14 @@ export const Assistant = () => {
           <span className="text-muted-foreground text-sm">
             {state?.model || "OpenRouter"} · {status}
           </span>
+          <TooltipIconButton
+            tooltip="Refresh"
+            className="ms-auto"
+            disabled={!connected || refreshing}
+            onClick={() => void refresh()}
+          >
+            <RefreshCwIcon />
+          </TooltipIconButton>
         </header>
         <div className="min-h-0 flex-1">
           <Thread />

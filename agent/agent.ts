@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, watch } from "node:fs";
 import { mkdir, readdir } from "node:fs/promises";
-import { createServer, type ServerResponse } from "node:http";
+import { createServer } from "node:http";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -167,7 +167,12 @@ function summarize(value) {
       });
     }
   };
-  for (const entry of value.entries) {
+  const resetAt = value.entries.findLastIndex(
+    (entry) => entry.kind === "pi.reset",
+  );
+  const visible =
+    resetAt < 0 ? value.entries : value.entries.slice(resetAt + 1);
+  for (const entry of visible) {
     const message = entry.model?.[0];
     if (entry.kind === "chat.input")
       items.push({ type: "user", ...entry.data });
@@ -184,8 +189,6 @@ function summarize(value) {
         });
     } else if (entry.kind === "pi.compaction")
       items.push({ type: "note", text: "Older messages were summarized." });
-    else if (entry.kind === "pi.reset")
-      items.push({ type: "note", text: "Started a fresh context." });
   }
   const live = value.docs["pi.live"] ?? {};
   if (live.generation?.message) assistant(live.generation.message, true);
@@ -211,7 +214,7 @@ function summarize(value) {
   };
 }
 
-const pages = new Set<ServerResponse>();
+const pages = new Set();
 let latest = JSON.stringify(summarize(view.value));
 let timer;
 view.subscribe(() => {
@@ -275,6 +278,11 @@ async function handle(req, res) {
   if (req.method === "POST" && url.pathname === "/api/stop") {
     await root.abort(context);
     return send(res, 200, { stopped: true });
+  }
+  if (req.method === "POST" && url.pathname === "/api/reset") {
+    await root.abort(context);
+    await root.reset(undefined, context);
+    return send(res, 200, { reset: true });
   }
   if (req.method === "POST" && url.pathname === "/api/messages") {
     let body = "";

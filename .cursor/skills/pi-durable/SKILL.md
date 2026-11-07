@@ -56,10 +56,11 @@ Keep these routes. They are what `web/` calls.
 
 | Method and path | Behavior |
 | --- | --- |
-| `GET /api/state` | JSON summary: `busy`, `model`, `items` |
+| `GET /api/state` | JSON summary: `busy`, `model`, `items`. Items are only those after the newest reset |
 | `GET /api/events` | SSE of that summary. Server pushes on view updates and pings every 25s |
 | `POST /api/messages` | `{ text, requestId?, wait? }`. `202` with submission id unless `wait` |
 | `POST /api/stop` | `root.abort` |
+| `POST /api/reset` | Abort the run, then `root.reset` so the conversation starts empty |
 
 `wait: true` waits for the submission, then reads the assistant entry at `settled.answer`. A write of only `kind` and `data` is not a model input; chat input here is `type: "input"` plus an `entry`.
 
