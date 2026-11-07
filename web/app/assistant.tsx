@@ -9,6 +9,7 @@ import {
 } from "@assistant-ui/react";
 import { Thread } from "@/components/assistant-ui/elements/thread.aui";
 import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-icon-button";
+import { ObserveTools, type ObservedTool } from "@/components/observe-tools";
 import { RefreshCwIcon } from "lucide-react";
 
 type AgentItem =
@@ -28,13 +29,28 @@ type AgentState = {
   busy: boolean;
   model: string;
   items: AgentItem[];
+  toolLog?: { id?: string; name: string; status: string }[];
 };
 
 export const Assistant = () => {
   const [state, setState] = useState<AgentState | null>(null);
   const [connected, setConnected] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [tab, setTab] = useState<"ask" | "observe">("ask");
+  const [tools, setTools] = useState<ObservedTool[]>([]);
   const messages = useMemo(() => toMessages(state), [state]);
+
+  useEffect(() => {
+    if (state?.toolLog) {
+      setTools(state.toolLog);
+      return;
+    }
+    const incoming = (state?.items ?? []).flatMap((item) =>
+      item.type === "tool" ? [{ id: item.id, name: item.name, status: item.status }] : [],
+    );
+    if (incoming.length === 0) return;
+    setTools((prev) => mergeTools(prev, incoming));
+  }, [state]);
 
   useEffect(() => {
     const events = new EventSource("/api/agent/events");
@@ -88,25 +104,80 @@ export const Assistant = () => {
       <div className="flex h-dvh flex-col">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4">
           <span className="font-medium">AIE</span>
-          <span className="text-muted-foreground text-sm">
+          <div role="tablist" aria-label="Views" className="bg-muted flex items-center rounded-lg p-0.5">
+            <TabButton selected={tab === "ask"} onClick={() => setTab("ask")}>
+              Ask
+            </TabButton>
+            <TabButton selected={tab === "observe"} onClick={() => setTab("observe")}>
+              Observe
+            </TabButton>
+          </div>
+          <span className="text-muted-foreground ms-auto text-sm">
             {state?.model || "OpenRouter"} · {status}
           </span>
           <TooltipIconButton
             tooltip="Refresh"
-            className="ms-auto"
             disabled={!connected || refreshing}
             onClick={() => void refresh()}
           >
             <RefreshCwIcon />
           </TooltipIconButton>
         </header>
-        <div className="min-h-0 flex-1">
+        <div className={tab === "ask" ? "min-h-0 flex-1" : "hidden"}>
           <Thread />
+        </div>
+        <div className={tab === "observe" ? "min-h-0 flex-1" : "hidden"}>
+          <ObserveTools tools={tools} />
         </div>
       </div>
     </AssistantRuntimeProvider>
   );
 };
+
+function mergeTools(prev: ObservedTool[], incoming: ObservedTool[]) {
+  const index = new Map(prev.map((tool, i) => [tool.id, i]));
+  const next = prev.slice();
+  let changed = false;
+  for (const tool of incoming) {
+    if (!tool.id) continue;
+    const at = index.get(tool.id);
+    if (at === undefined) {
+      index.set(tool.id, next.length);
+      next.push(tool);
+      changed = true;
+    } else if (next[at].status !== tool.status || next[at].name !== tool.name) {
+      next[at] = tool;
+      changed = true;
+    }
+  }
+  return changed ? next : prev;
+}
+
+function TabButton({
+  selected,
+  onClick,
+  children,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  children: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={selected}
+      onClick={onClick}
+      className={
+        selected
+          ? "bg-background text-foreground rounded-md px-3 py-1 text-sm font-medium shadow-sm"
+          : "text-muted-foreground hover:text-foreground rounded-md px-3 py-1 text-sm font-medium"
+      }
+    >
+      {children}
+    </button>
+  );
+}
 
 function textOf(message: AppendMessage) {
   return message.content

@@ -216,7 +216,44 @@ function summarize(value) {
     busy: live.run !== undefined,
     model: agent ? `${agent.provider}/${agent.modelId}` : "",
     items: items.slice(-300),
+    toolLog: toolLogOf(value),
   };
+}
+
+function toolLogOf(value) {
+  const tools = new Map();
+  const order = [];
+  const add = (id, name, status) => {
+    if (!id || !name || tools.has(id)) return;
+    const tool = { id, name, status };
+    tools.set(id, tool);
+    order.push(tool);
+  };
+  for (const entry of value.entries ?? []) {
+    const message = entry.model?.[0];
+    if (!message) continue;
+    if (entry.kind === "pi.assistant") {
+      for (const part of message.content ?? []) {
+        if (part.type === "toolCall") add(part.id, part.name, "pending");
+      }
+    } else if (entry.kind === "pi.tool-result") {
+      const existing = tools.get(message.toolCallId);
+      const status = message.isError ? "error" : "done";
+      if (existing) existing.status = status;
+      else add(message.toolCallId, message.toolName, status);
+    }
+  }
+  const live = value.docs["pi.live"] ?? {};
+  for (const part of live.generation?.message?.content ?? []) {
+    if (part.type === "toolCall") add(part.id, part.name, "pending");
+  }
+  for (const running of live.tools ?? []) {
+    const existing = tools.get(running.callId);
+    if (existing) {
+      if (existing.status === "pending") existing.status = running.status ?? "running";
+    } else add(running.callId, running.name, running.status ?? "running");
+  }
+  return order.slice(-500);
 }
 
 const pages = new Set();
