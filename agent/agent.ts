@@ -17,6 +17,7 @@ import { bindOptimize } from "./optimize-bridge.ts";
 import { OptimizeMode } from "./optimize-mode.ts";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import { record } from "./observe.ts";
 
 const dir = import.meta.dirname;
 loadEnv(join(dir, "agent.env"));
@@ -110,7 +111,10 @@ const harness = await Harness.open(
     models,
     registry,
     env: ({ cwd }) => new NodeExecutionEnv({ cwd: cwd ?? workspace }),
-    onReport: (error) => console.error("pi-durable:", error),
+    onReport: (error) => {
+      console.error("pi-durable:", error);
+      record("error", { message: String(error?.message ?? error).slice(0, 300) });
+    },
   },
   context,
 );
@@ -142,6 +146,7 @@ const port = address && typeof address === "object" ? address.port : address;
 console.log(
   `pi-durable listening on ${port}, model ${model.provider}/${model.modelId}`,
 );
+record("startup", { model: `${model.provider}/${model.modelId}` });
 
 const textOf = (content) =>
   typeof content === "string"

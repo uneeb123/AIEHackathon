@@ -1,14 +1,14 @@
 import { defineDoc } from "@earendil-works/pi-durable";
 import type { JsonObject } from "@earendil-works/pi-durable";
+import { record } from "./observe.ts";
 
-export const DECISION_MODEL = "typesafe/jev-1.14-20261014";
+export const DECISION_MODEL = "subq-snap-1.1";
 
-// Probe on 2026-11-07 against the AI data-center criterion, one noul per company.
-// Suppliers landed at 0.95–0.99. Unrelated, negated, and adversarial companies landed at 0.02–0.20.
-// A false keep spends one line-item call. A false drop leaves a supplier out of the table.
+// Snap 1.1 on 2026-11-07, AI data-center criterion: NVDA 0.999, KO 0.004.
+// A false keep spends one line-item call. A false drop leaves a supplier out.
 const RELEVANT = 0.5;
 
-const DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions";
+const DECISIONS_URL = "https://api.subq.ai/v1/systemone";
 const TICKER = /^[A-Z][A-Z0-9.]{0,9}$/;
 
 export type OptimizeState = {
@@ -68,9 +68,16 @@ export async function judgeRelevance(criterion: string, companies: readonly Comp
     if (answer?.type !== "noul" || typeof answer.noul !== "number") {
       throw new Error(`relevance answer for ${company.ticker} was not a noul`);
     }
+    const decision = answer.noul >= RELEVANT ? "keep" : "drop";
     console.log(
-      `optimize ${body.model} ${company.ticker} relevant=${answer.noul.toFixed(2)} ${answer.noul >= RELEVANT ? "keep" : "drop"}`,
+      `optimize ${body.model} ${company.ticker} relevant=${answer.noul.toFixed(2)} ${decision}`,
     );
+    record("relevance", {
+      model: body.model,
+      ticker: company.ticker,
+      score: Number(answer.noul.toFixed(4)),
+      decision,
+    });
     if (answer.noul >= RELEVANT) matches.push({ ticker: company.ticker, relevance: answer.noul });
     else skipped.push({ ticker: company.ticker, reason: "not relevant" });
   }
@@ -140,10 +147,8 @@ function relevanceQuestion(ticker: string) {
 }
 
 async function decide(state: unknown, questions: Record<string, unknown>) {
-  const key = process.env.OPENROUTER_API_KEY;
-  if (!key || key === "exe-llm-integration") {
-    throw new Error("OPENROUTER_API_KEY is not available for decisions");
-  }
+  const key = process.env.SUBQ_API_KEY;
+  if (!key) throw new Error("SUBQ_API_KEY is not available for decisions");
   const response = await fetch(DECISIONS_URL, {
     method: "POST",
     headers: {

@@ -2,6 +2,7 @@ import { defineExtension, defineTool, hook, GenerationTask, ToolTask } from "@ea
 import { Type } from "@earendil-works/pi-ai";
 import { judgeRelevance, OPTIMIZE_NOTE, rankFinancials } from "../optimize-mode.ts";
 import { readOptimize } from "../optimize-bridge.ts";
+import { record } from "../observe.ts";
 
 const company = Type.Object({
   ticker: Type.String({ description: "US ticker, such as NVDA.", minLength: 1, maxLength: 10 }),
@@ -15,7 +16,7 @@ const company = Type.Object({
 const judgeRelevanceTool = defineTool({
   name: "judge_relevance",
   description:
-    "Decide which companies fit a business criterion. Uses Jev, one yes-or-no per company. Returns the matches and the tickers that were dropped. Does not retrieve financials.",
+    "Decide which companies fit a business criterion. Uses Snap, one yes-or-no per company. Returns the matches and the tickers that were dropped. Does not retrieve financials.",
   parameters: Type.Object({
     criterion: Type.String({
       description: "What the company must sell. For example, products or services used to build or operate AI data centers.",
@@ -102,6 +103,19 @@ export default defineExtension({
         if (call.name === "judge_relevance" && !mode.enabled) {
           return { block: "judge_relevance runs only in Optimize mode." };
         }
+        return undefined;
+      },
+      afterTool: (call, result) => {
+        const output = Array.isArray(result.output) ? result.output : [];
+        const text = output
+          .filter((part) => part.type === "text" && part.text)
+          .map((part) => part.text)
+          .join(" ");
+        record("tool", {
+          name: call.name,
+          status: result.isError ? "error" : "done",
+          ...(result.isError && text ? { message: text.slice(0, 200) } : {}),
+        });
         return undefined;
       },
     }),
