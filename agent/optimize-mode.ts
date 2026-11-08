@@ -1,29 +1,20 @@
 import { defineDoc } from "@earendil-works/pi-durable";
 import type { JsonObject } from "@earendil-works/pi-durable";
-import {
-  FINANCIAL_DATASETS_PREFIX,
-  financialDatasetsEndpoints,
-} from "./financial-datasets-catalog.ts";
 
 export const DECISION_MODEL = "typesafe/jev-1.14-20261014";
 
-// Probe on 2026-11-07: clear yes sat at 0.82–0.98 and clear no at 0.01–0.05.
-// A false allow spends tokens. A false block drops information the answer needed.
-const NEEDS_INFORMATION = 0.5;
-const ALREADY_RETRIEVED = 0.5;
+// Probe on 2026-11-07 against the AI data-center criterion, one noul per company.
+// Suppliers landed at 0.95–0.99. Unrelated, negated, and adversarial companies landed at 0.02–0.20.
+// A false keep spends one line-item call. A false drop leaves a supplier out of the table.
+const RELEVANT = 0.5;
 
 const DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions";
-
-export type RecordedCall = {
-  name: string;
-  returns: string;
-  arguments: JsonObject;
-};
+const TICKER = /^[A-Z][A-Z0-9.]{0,9}$/;
 
 export type OptimizeState = {
   enabled: boolean;
   question: string;
-  calls: RecordedCall[];
+  calls: JsonObject[];
 };
 
 export const OptimizeMode = defineDoc<OptimizeState>({
@@ -35,31 +26,120 @@ export const OptimizeMode = defineDoc<OptimizeState>({
   initial: () => ({ enabled: false, question: "", calls: [] }),
 });
 
-const returnsByName = new Map<string, string>([
-  ["tool_search", "Search deferred tools and load the ones that match a query."],
-  ...financialDatasetsEndpoints.map(
-    (endpoint) =>
-      [`${FINANCIAL_DATASETS_PREFIX}${endpoint.name}`, endpoint.description] as const,
-  ),
-]);
+export const OPTIMIZE_NOTE =
+  "Optimize mode is on. Use judge_relevance to decide which companies fit, passing a one-line business description from company facts. Then retrieve annual revenue and free cash flow with get_line_items for the matches only. Pass those figures to rank_financials as percents. Cite the line-item source. Do not call get_filing_items or search_documents.";
 
-export function recordedCall(name: string, args: JsonObject): RecordedCall {
+type Company = { ticker: string; business: string };
+
+export async function judgeRelevance(criterion: string, companies: readonly Company[]) {
+  const skipped: { ticker: string; reason: string }[] = [];
+  const pending = new Map<string, Company>();
+  for (const company of companies) {
+    const ticker = company.ticker.trim().toUpperCase();
+    const business = company.business.trim();
+    if (!TICKER.test(ticker)) {
+      skipped.push({ ticker: company.ticker, reason: "invalid ticker" });
+      continue;
+    }
+    if (!business) {
+      skipped.push({ ticker, reason: "no business description" });
+      continue;
+    }
+    if (pending.has(ticker)) continue;
+    pending.set(ticker, { ticker, business: business.slice(0, 400) });
+  }
+  const selected = [...pending.values()].slice(0, 12);
+  for (const company of [...pending.values()].slice(12)) {
+    skipped.push({ ticker: company.ticker, reason: "limit is 12 companies per check" });
+  }
+  if (selected.length === 0) return { model: DECISION_MODEL, matches: [], skipped };
+
+  const state = {
+    criterion: criterion.trim().slice(0, 500),
+    companies: Object.fromEntries(
+      selected.map((company) => [company.ticker, { ticker: company.ticker, business: company.business }]),
+    ),
+  };
+  const questions = Object.fromEntries(selected.map((company) => [company.ticker, relevanceQuestion(company.ticker)]));
+  const body = await decide(state, questions);
+  const matches = [];
+  for (const company of selected) {
+    const answer = body.answers[company.ticker];
+    if (answer?.type !== "noul" || typeof answer.noul !== "number") {
+      throw new Error(`relevance answer for ${company.ticker} was not a noul`);
+    }
+    console.log(
+      `optimize ${body.model} ${company.ticker} relevant=${answer.noul.toFixed(2)} ${answer.noul >= RELEVANT ? "keep" : "drop"}`,
+    );
+    if (answer.noul >= RELEVANT) matches.push({ ticker: company.ticker, relevance: answer.noul });
+    else skipped.push({ ticker: company.ticker, reason: "not relevant" });
+  }
+  return { model: body.model, matches, skipped };
+}
+
+export type FinancialRow = {
+  ticker: string;
+  revenue_growth: number;
+  free_cash_flow: number;
+  source?: string;
+  relevance?: string;
+};
+
+export function rankFinancials(
+  rows: readonly {
+    ticker: string;
+    revenue_growth: unknown;
+    free_cash_flow: unknown;
+    source?: string;
+    relevance?: string;
+  }[],
+  options: { minGrowthPercent?: number; requirePositiveFreeCashFlow?: boolean; limit?: number },
+) {
+  const minimum = options.minGrowthPercent ?? 15;
+  const requireCash = options.requirePositiveFreeCashFlow !== false;
+  const limit = Math.min(5, Math.max(1, options.limit ?? 5));
+  const kept: FinancialRow[] = [];
+  const dropped: { ticker: string; reason: string }[] = [];
+  for (const row of rows) {
+    const growth = percent(row.revenue_growth);
+    const cash = money(row.free_cash_flow);
+    if (growth === undefined) {
+      dropped.push({ ticker: row.ticker, reason: "revenue growth missing" });
+      continue;
+    }
+    if (growth <= minimum) {
+      dropped.push({ ticker: row.ticker, reason: "revenue growth is not above the cutoff" });
+      continue;
+    }
+    if (requireCash && (cash === undefined || cash <= 0)) {
+      dropped.push({ ticker: row.ticker, reason: "free cash flow is not positive" });
+      continue;
+    }
+    kept.push({
+      ticker: row.ticker.trim().toUpperCase(),
+      revenue_growth: growth,
+      free_cash_flow: cash ?? 0,
+      ...(row.source ? { source: row.source } : {}),
+      ...(row.relevance ? { relevance: row.relevance } : {}),
+    });
+  }
+  kept.sort((left, right) => right.revenue_growth - left.revenue_growth);
+  return { rows: kept.slice(0, limit), dropped };
+}
+
+function relevanceQuestion(ticker: string) {
   return {
-    name,
-    returns: returnsByName.get(name) ?? name,
-    arguments: slimArguments(args),
+    type: "noul",
+    instructions: `Does the company in \`companies.${ticker}\` sell a product or service that \`criterion\` is asking for?`,
+    criteria: {
+      true: "That company sells a product or service the criterion describes.",
+      false:
+        "That company is outside the criterion. A company that only buys or uses the product, or only mentions it, does not count.",
+    },
   };
 }
 
-export function sameCall(left: RecordedCall, right: RecordedCall) {
-  return left.name === right.name && stable(left.arguments) === stable(right.arguments);
-}
-
-export async function judgeCall(input: {
-  question: string;
-  call: RecordedCall;
-  earlier_calls: readonly RecordedCall[];
-}) {
+async function decide(state: unknown, questions: Record<string, unknown>) {
   const key = process.env.OPENROUTER_API_KEY;
   if (!key || key === "exe-llm-integration") {
     throw new Error("OPENROUTER_API_KEY is not available for decisions");
@@ -70,32 +150,7 @@ export async function judgeCall(input: {
       authorization: `Bearer ${key}`,
       "content-type": "application/json",
     },
-    body: JSON.stringify({
-      model: DECISION_MODEL,
-      state: {
-        question: input.question.slice(0, 2000),
-        call: input.call,
-        earlier_calls: input.earlier_calls.slice(-8),
-      },
-      questions: {
-        needs_information: {
-          type: "noul",
-          instructions: "Does answering `question` require the information `call` retrieves?",
-          criteria: {
-            true: "The question asks for something this call returns.",
-            false: "The question can be answered without what this call returns.",
-          },
-        },
-        already_retrieved: {
-          type: "noul",
-          instructions: "Does an earlier call already retrieve the same information `call` would?",
-          criteria: {
-            true: "An entry in `earlier_calls` asks for the same information as `call`.",
-            false: "`earlier_calls` is empty, or none of them ask for the same information.",
-          },
-        },
-      },
-    }),
+    body: JSON.stringify({ model: DECISION_MODEL, state, questions }),
     signal: AbortSignal.timeout(15_000),
   });
   const text = await response.text();
@@ -104,39 +159,22 @@ export async function judgeCall(input: {
     model?: string;
     answers?: Record<string, { type?: string; noul?: number }>;
   };
-  const needs = body.answers?.needs_information;
-  const already = body.answers?.already_retrieved;
-  if (needs?.type !== "noul" || typeof needs.noul !== "number") {
-    throw new Error("needs_information was not a noul");
-  }
-  if (already?.type !== "noul" || typeof already.noul !== "number") {
-    throw new Error("already_retrieved was not a noul");
-  }
-  const allow = needs.noul >= NEEDS_INFORMATION && already.noul < ALREADY_RETRIEVED;
-  console.log(
-    `optimize ${body.model ?? DECISION_MODEL} ${input.call.name} needs=${needs.noul.toFixed(2)} already=${already.noul.toFixed(2)} ${allow ? "allow" : "block"}`,
-  );
-  return allow;
+  if (!body.answers || typeof body.model !== "string") throw new Error("Decisions response was incomplete");
+  return { model: body.model, answers: body.answers };
 }
 
-function slimArguments(value: JsonObject): JsonObject {
-  const text = JSON.stringify(value);
-  if (text.length <= 600) return value;
-  return { truncated: text.slice(0, 600) };
+function percent(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return undefined;
+  const parsed = Number(value.trim().replace(/[%$,\s]/g, ""));
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function stable(value: unknown): string {
-  return JSON.stringify(sortValue(value));
-}
-
-function sortValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortValue);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.keys(value)
-        .sort()
-        .map((key) => [key, sortValue((value as Record<string, unknown>)[key])]),
-    );
-  }
-  return value;
+function money(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return undefined;
+  const negative = value.includes("(") && value.includes(")");
+  const parsed = Number(value.replace(/[$,()\s]/g, ""));
+  if (!Number.isFinite(parsed)) return undefined;
+  return negative ? -Math.abs(parsed) : parsed;
 }

@@ -25,6 +25,7 @@ export function OptimizeToggle() {
     <button
       type="button"
       aria-pressed={enabled}
+      title="Judge company fit with Jev, then filter the financials in code"
       onClick={() => setEnabled(!enabled)}
       className={
         enabled

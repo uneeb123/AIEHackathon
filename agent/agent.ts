@@ -122,12 +122,6 @@ bindOptimize({
       question: "",
       calls: [],
     },
-  remember: async (call) => {
-    await root.commit(async (tx) => {
-      const doc = await tx.doc(OptimizeMode, root.id);
-      if (doc.calls.length < 8) doc.calls.push(call);
-    }, context);
-  },
 });
 const view = await root.viewState(context);
 const stored = view.value.docs["pi.agent"]?.model;
