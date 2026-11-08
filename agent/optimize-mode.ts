@@ -27,7 +27,7 @@ export const OptimizeMode = defineDoc<OptimizeState>({
 });
 
 export const OPTIMIZE_NOTE =
-  "Optimize mode is on. Use judge_relevance to decide which companies fit, passing a one-line business description from company facts. Then retrieve annual revenue and free cash flow with get_line_items for the matches only. Pass those figures to rank_financials as percents. Cite the line-item source. Do not call get_filing_items or search_documents.";
+  "Optimize mode is on. Load Financial Datasets tools and take figures from them. After screen_stocks or get_company_facts, call judge_relevance with the business line those tools returned. Then call rank_financials with annual revenue growth as a percent and free cash flow. Keep filing tools for a citation the statement row does not already include.";
 
 type Company = { ticker: string; business: string };
 

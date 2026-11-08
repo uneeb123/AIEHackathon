@@ -179,10 +179,12 @@ export default defineExtension({
   sections: [
     section("financial-datasets", () =>
       [
-        "Market, filing, and company figures come from Financial Datasets.",
-        "Those tools are deferred and named financial_datasets__*. Use tool_search to load the ones a question needs, then call them.",
-        "Do not invent prices, filings, or statement figures when a tool can retrieve them.",
-        "A 401 means FINANCIAL_DATASETS_API_KEY is missing or rejected. A 402 means the Financial Datasets account is not funded. Say so, and do not guess the number.",
+        "Market, filing, and company figures come from Financial Datasets. The API key is already configured on this process. Never print it, and do not sign up for another key.",
+        "Tools are deferred and named financial_datasets__*. Use tool_search to load the ones a question needs, then call them. Search for the tool name, such as get_line_items or screen_stocks.",
+        "Discover companies with screen_stocks. Read identity with get_company_facts. Read annual revenue, free cash flow, and growth with get_line_items or get_financial_metrics. Use get_income_statement for the statement itself. Use get_stock_price for a latest price.",
+        "Use get_filings and get_filing_items when the answer needs filing text or a citation that is not already on the statement row. Ask for one section, not a whole filing.",
+        "Do not invent prices, filings, or statement figures. Cite the tool row you used, including the ticker, period, and accession number when it is present.",
+        "A 401 means the key was rejected. Say so. A 402 means the account is not funded. Say so, and do not guess the number. A 403 that says historical data is limited means this plan only includes recent periods. Use the latest annual period inside that window. Do not treat the missing years as zero.",
       ].join("\n"),
     ),
   ],

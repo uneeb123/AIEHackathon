@@ -3,12 +3,6 @@ import { Type } from "@earendil-works/pi-ai";
 import { judgeRelevance, OPTIMIZE_NOTE, rankFinancials } from "../optimize-mode.ts";
 import { readOptimize } from "../optimize-bridge.ts";
 
-const FILING_TOOLS = new Set([
-  "financial_datasets__get_filing_items",
-  "financial_datasets__search_documents",
-  "financial_datasets__list_filing_item_types",
-]);
-
 const company = Type.Object({
   ticker: Type.String({ description: "US ticker, such as NVDA.", minLength: 1, maxLength: 10 }),
   business: Type.String({
@@ -107,12 +101,6 @@ export default defineExtension({
         const mode = await readOptimize();
         if (call.name === "judge_relevance" && !mode.enabled) {
           return { block: "judge_relevance runs only in Optimize mode." };
-        }
-        if (!mode.enabled) return undefined;
-        if (FILING_TOOLS.has(call.name)) {
-          return {
-            block: "Optimize mode uses company facts, line items, and rank_financials. Do not pull filing text.",
-          };
         }
         return undefined;
       },
